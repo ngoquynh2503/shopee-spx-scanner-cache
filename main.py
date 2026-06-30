@@ -190,25 +190,33 @@ st.set_page_config(page_title="SPX Mobile Scanner", layout="centered")
 st.markdown(
     """
     <style>
-    /* 1. Ẩn menu 3 chấm, nút Deploy và toàn bộ thanh Header trên cùng */
+    /* Ẩn Menu 3 chấm, nút Deploy mặc định và toàn bộ Header trên cùng */
     #MainMenu {visibility: hidden !important;}
     footer {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     header {display: none !important; visibility: hidden !important;}
     
-    /* 2. Ẩn nút tròn avatar/pixel quản lý host ở góc dưới bên phải */
+    /* Ẩn nút tròn pixel quản lý trạng thái/kết nối Cloud */
     div[data-testid="stStatusWidget"] {display: none !important; visibility: hidden !important;}
-    
-    /* 3. Ẩn nút "View app source" (Xem nguồn ứng dụng) */
     button[title="View app source"] {display: none !important;}
     
-    /* 4. Cấu hình đè để xóa bỏ khoảng trống/thanh công cụ Viewer ở góc dưới màn hình */
+    /* ẨN TRIỆT ĐỂ CÁC TÊN CLASS THEO YÊU CẦU CỦA BẠN (DÙNG CHO PHẦN LOGO/PROFILE DƯỚI GÓC) */
+    [class*="_profileContainer_gzau3_53"],
+    [class*="_container_gzau3_1"],
+    [class*="_viewerBadge_aycw8_23"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+    }
+    
+    /* Xóa phần toolbar và khung badge bọc ngoài của hệ thống Streamlit viewer */
     .stAppToolbar {display: none !important; visibility: hidden !important;}
     div[class*="viewerBadge"] {display: none !important; visibility: hidden !important;}
-    div[class*="styles_viewerBadge"] {display: none !important; visibility: hidden !important;}
     iframe[title="Manage app"] {display: none !important; visibility: hidden !important;}
     
-    /* Cắt bớt phần padding thừa phía trên do ẩn header giúp giao diện khít lên đầu trang */
+    /* Cân bằng lại giao diện để khít lên trên đầu trang */
     .block-container {
         padding-top: 2rem !important;
     }

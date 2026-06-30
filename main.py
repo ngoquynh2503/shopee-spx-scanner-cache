@@ -203,7 +203,7 @@ st.markdown(
     /* ẨN TRIỆT ĐỂ CÁC TÊN CLASS THEO YÊU CẦU CỦA BẠN (DÙNG CHO PHẦN LOGO/PROFILE DƯỚI GÓC) */
     [class*="_profileContainer_gzau3_53"],
     [class*="_container_gzau3_1"],
-    [class*="_viewerBadge_aycw8_23"] {
+    [class*="_container_gzau3_1 _viewerBadge_aycw8_23"] {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;

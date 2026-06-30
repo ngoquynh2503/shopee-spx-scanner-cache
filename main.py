@@ -5,14 +5,13 @@ from datetime import datetime
 from typing import Optional, Dict, List
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import threading  # Dùng để chạy ngầm việc ghi log Google Sheet giúp tăng tốc độ phản hồi API
+import threading
 
 # ==================== CẤU HÌNH HỆ THỐNG ====================
 API_ALL_LIST  = "https://spx.shopee.vn/api/in-station/cache_order_task/all_list"
 API_DETAIL    = "https://spx.shopee.vn/api/in-station/cache_order_task/detail"
 API_ORDER_ADD = "https://spx.shopee.vn/api/in-station/cache_order_task/order/add"
 
-# Google Sheet IDs
 COOKIE_SPREADSHEET_ID = "1O1rDK916nKZnWrJJNbruUsGZ8msxqafxYkhxR0871TM"
 LOG_SPREADSHEET_ID    = "1G8V-lbw4mfe_bGdMnKpvOYlRXX_E9OlSH9brWypwf94"
 
@@ -32,21 +31,20 @@ GOOGLE_CREDS_DICT = {
     "universe_domain": "googleapis.com"
 }
 
-# Sử dụng Session chung của thư viện `requests` để giữ kết nối HTTP (Keep-Alive)
 if "http_session" not in st.session_state:
     st.session_state.http_session = requests.Session()
 
-# Khởi tạo lịch sử và thông báo lỗi toàn cục trong Session State
 if "history" not in st.session_state:
     st.session_state.history = []
 if "scan_error" not in st.session_state:
     st.session_state.scan_error = None
 if "cached_cookie" not in st.session_state:
     st.session_state.cached_cookie = None
+if "active_task_id" not in st.session_state:
+    st.session_state.active_task_id = None
 
 # ==================== GOOGLE SHEETS FUNCTIONS ====================
 def fetch_cookie_from_sheet() -> Optional[str]:
-    """Hàm lấy cookie trực tiếp từ Sheet (Không cache_data của streamlit để có thể gọi lại ngay lập tức)"""
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
         creds = Credentials.from_service_account_info(GOOGLE_CREDS_DICT, scopes=scopes)
@@ -60,20 +58,18 @@ def fetch_cookie_from_sheet() -> Optional[str]:
             return rows[0][0].strip()
         return None
     except Exception as e:
-        st.error(f"Lỗi khi lấy Cookie từ Google Sheet: {e}")
+        st.error(f"Lỗi Cookie Sheet: {e}")
         return None
 
 def get_or_refresh_cookie() -> Optional[str]:
-    """Chỉ đọc cookie từ sheet 1 lần duy nhất, lưu vào session state"""
     if not st.session_state.cached_cookie:
-        with st.spinner("Đang tải mới Cookie từ Google Sheet..."):
+        with st.spinner("Đang tải Cookie..."):
             cookie = fetch_cookie_from_sheet()
             if cookie:
                 st.session_state.cached_cookie = cookie
     return st.session_state.cached_cookie
 
 def _async_append_sheet(row_data: List):
-    """Hàm chạy ngầm phụ trách đẩy data lên Google Sheet để không làm nghẽn giao diện chính"""
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(GOOGLE_CREDS_DICT, scopes=scopes)
@@ -86,15 +82,13 @@ def _async_append_sheet(row_data: List):
             body=body
         ).execute()
     except Exception:
-        pass  # Bỏ qua lỗi ngầm để tránh gián đoạn trải nghiệm người dùng
+        pass
 
 def append_to_google_sheet_async(row_data: List):
-    # Tạo một luồng (thread) mới để lưu log, tối ưu hóa tốc độ tải trang phản hồi
     threading.Thread(target=_async_append_sheet, args=(row_data,), daemon=True).start()
 
 # ==================== SCAN & PARSER UTILS ====================
 def extract_latest_scan_code(raw: str) -> str:
-    """Tự động tách mã thông minh dựa vào độ dài và chuỗi lặp do máy scan gây ra"""
     raw = raw.strip()
     if not raw: return ""
     
@@ -118,29 +112,27 @@ def extract_latest_scan_code(raw: str) -> str:
 
 def build_headers(cookie: str) -> dict:
     return {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
         "Accept": "application/json",
         "Content-Type": "application/json",
         "Cookie": cookie,
     }
 
-# ==================== SHOPEE API CALLS (TỐI ƯU TỐC ĐỘ) ====================
+# ==================== SHOPEE API CALLS ====================
 def lookup_task(task_id: str, cookie: str) -> Dict:
     hdrs = build_headers(cookie)
     payload = {"cache_order_task": task_id.strip(), "pageno": 1, "count": 24}
     
     try:
         resp = st.session_state.http_session.post(API_ALL_LIST, json=payload, headers=hdrs, timeout=5)
-        
-        # Nếu Cookie hết hạn (401), xóa cached_cookie để lượt quét tiếp theo tự reload cookie mới
         if resp.status_code == 401: 
             st.session_state.cached_cookie = None
-            return {"_error": "Cookie hết hạn (401) - Hệ thống sẽ tự động làm mới ở lần quét tiếp theo!"}
+            return {"_error": "Cookie hết hạn (401)"}
             
-        if resp.status_code != 200: return {"_error": f"Không tìm thấy hoặc Lỗi HTTP {resp.status_code}"}
+        if resp.status_code != 200: return {"_error": f"Lỗi HTTP {resp.status_code}"}
         
         res = resp.json()
-        if res.get("retcode") != 0: return {"_error": res.get("message", "Lỗi dữ liệu từ Shopee API")}
+        if res.get("retcode") != 0: return {"_error": res.get("message", "Lỗi Shopee API")}
         
         items = res.get("data", {}).get("list", [])
         raw_data = {}
@@ -149,14 +141,13 @@ def lookup_task(task_id: str, cookie: str) -> Dict:
                 raw_data = item
                 break
         if not raw_data and items: raw_data = items[0]
-        if not raw_data: return {"_error": f"Không tìm thấy mã Task [{task_id}] trên hệ thống Shopee"}
+        if not raw_data: return {"_error": f"Không tìm thấy Task [{task_id}]"}
 
         raw_status = raw_data.get("status", "")
         try: status_code = int(raw_status)
         except: status_code = None
         status_str = status_mapping.get(status_code, str(raw_status) if raw_status != "" else "—")
 
-        # Gọi API lấy chi tiết đơn hàng con cùng lúc
         params = {"cache_order_task": task_id.strip(), "pageno": 1, "count": 250}
         resp_detail = st.session_state.http_session.get(API_DETAIL, params=params, headers=hdrs, timeout=5)
         sub_orders = []
@@ -174,7 +165,7 @@ def lookup_task(task_id: str, cookie: str) -> Dict:
             "sub_orders": sub_orders 
         }
     except Exception as e:
-        return {"_error": f"Lỗi kết nối nhanh: {e}"}
+        return {"_error": f"Lỗi kết nối: {e}"}
 
 def add_order_to_task(task_id: str, fleet_order_id: str, cookie: str) -> dict:
     hdrs = build_headers(cookie)
@@ -190,45 +181,116 @@ def add_order_to_task(task_id: str, fleet_order_id: str, cookie: str) -> dict:
             st.session_state.cached_cookie = None
         return resp.json()
     except Exception as e:
-        return {"retcode": -1, "message": f"Lỗi kết nối: {e}"}
+        return {"retcode": -1, "message": f"Lỗi: {e}"}
 
-# ==================== WEB INTERFACE (STREAMLIT) ====================
-st.set_page_config(page_title="SPX Task Scanner Web", layout="wide")
-# ĐOẠN CODE ẨN NÚT DEPLOY VÀ MENU DẤU 3 CHẤM
+# ==================== GIAO DIỆN WEB MOBILE TỐI ƯU ====================
+st.set_page_config(page_title="SPX Mobile Scanner", layout="centered")
+
+# Ẩn các thành phần thừa, tối ưu CSS hiển thị trên Mobile
 st.markdown(
     """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stDeployButton {display:none;}
-    header {visibility: hidden;} /* Ẩn toàn bộ thanh header ở trên cùng */
+    header {visibility: hidden;}
+    div[data-testid="stStatusWidget"] {display: none;}
+    button[title="View app source"] {display: none;}
+    
+    /* Tăng kích thước font chữ và padding của input trên mobile để dễ bấm */
+    .stTextInput input {
+        font-size: 16px !important;
+        padding: 12px !important;
+    }
+    /* Làm gọn phần thông số metric trên Mobile */
+    div[data-testid="stMetricValue"] {
+        font-size: 24px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-st.title("🛵 SPX Cache Order Task Scanner")
+st.title("🛵 SPX Mobile Scanner")
 
-# Đọc Cookie (Sử dụng cơ chế kiểm tra bộ nhớ tạm, chỉ tải lại nếu trống hoặc bị xóa)
 cookie_value = get_or_refresh_cookie()
-
 if not cookie_value:
-    st.error("❌ Không thể lấy Cookie từ ô C2 của Google Sheet hoặc Sheet rỗng.")
+    st.error("❌ Lỗi lấy Cookie từ Google Sheet.")
     st.stop()
 
-# CALLBACK XỬ LÝ QUÉT VÀ XÓA SẠCH Ô NHẬP NGAY LẬP TỨC
+# ĐỊNH NGHĨA POPUP CHI TIẾT ĐƠN HÀNG (FULL MÀN HÌNH MOBILE)
+@st.dialog("📦 CHI TIẾT TASK & ĐƠN CON", width="large")
+def show_task_detail_popup(task_id: str):
+    # Tìm thông tin task hiện tại từ history
+    task = next((h for h in st.session_state.history if h['cache_order_task'] == task_id), None)
+    if not task:
+        st.error("Không tìm thấy dữ liệu Task.")
+        return
+
+    # Khối thông số dạng cột dọc siêu gọn trên mobile
+    st.markdown(f"**Mã Task:** `{task['cache_order_task']}`")
+    st.markdown(f"**Trạng thái:** `{task['status']}`")
+    
+    m_col1, m_col2, m_col3 = st.columns(3)
+    m_col1.metric("Packed", task['packed_order_quantity'])
+    m_col2.metric("Fulfilled", task['fulfilled_order_quantity'])
+    m_col3.metric("RTS", task['rts_order_quantity'])
+    
+    st.caption(f"Thời gian: {task['create_time_str']}")
+    st.markdown("---")
+    
+    # Form thêm nhanh đơn hàng con ngay trong popup
+    st.markdown("### ➕ Thêm đơn con")
+    with st.form(key=f"popup_add_order_{task['cache_order_task']}", clear_on_submit=True):
+        fleet_id_input = st.text_input("Nhập/Quét Fleet Order ID:", placeholder="Quét mã đơn...")
+        submit_btn = st.form_submit_button("Thêm Đơn", use_container_width=True)
+        
+        if submit_btn and fleet_id_input:
+            fleet_id = extract_latest_scan_code(fleet_id_input.strip())
+            with st.spinner("Đang thêm đơn..."):
+                res_api = add_order_to_task(task['cache_order_task'], fleet_id, cookie_value)
+            if res_api.get("retcode") == 0:
+                st.success(f"✅ Đã thêm: {fleet_id}")
+                # Cập nhật lại dữ liệu danh sách con ngay tại chỗ
+                updated_result = lookup_task(task['cache_order_task'], cookie_value)
+                if "_error" not in updated_result:
+                    for idx, h in enumerate(st.session_state.history):
+                        if h['cache_order_task'] == task['cache_order_task']:
+                            st.session_state.history[idx] = updated_result
+                            break
+                    time.sleep(0.5)
+                    st.rerun()
+            else:
+                st.error(f"❌ Lỗi: {res_api.get('message')}")
+                
+    st.markdown(f"### 📄 Đơn con ({len(task['sub_orders'])})")
+    if task['sub_orders']:
+        table_data = []
+        for o_idx, o in enumerate(task['sub_orders'], 1):
+            stime = o.get("scan_time", 0)
+            stime_str = datetime.fromtimestamp(stime).strftime('%H:%M:%S') if stime else "—"
+            table_data.append({
+                "STT": o_idx,
+                "Mã Đơn Hàng": o.get("fleet_order_id", "—"),
+                "Giờ": stime_str
+            })
+        st.dataframe(table_data, use_container_width=True, hide_index=True)
+    else:
+        st.info("Chưa có đơn hàng con nào.")
+
+# CALLBACK XỬ LÝ QUÉT MÃ MỚI VÀ KÍCH HOẠT POPUP LẬP TỨC
 def handle_scan():
     raw_input = st.session_state.scan_input_field.strip()
-    st.session_state.scan_input_field = ""  # Xóa sạch ô nhập ngay lập tức
-    st.session_state.scan_error = None      # Reset lỗi cũ trước khi xử lý mã mới
+    st.session_state.scan_input_field = ""  
+    st.session_state.scan_error = None      
     
     if raw_input:
         sid = extract_latest_scan_code(raw_input)
         if sid:
             result = lookup_task(sid, cookie_value)
             if "_error" in result:
-                # Ghi nhận lỗi vào session state để hiển thị Alert màu đỏ nổi bật
-                st.session_state.scan_error = f"❌ LỖI QUÉT TASK [{sid}]: {result['_error']}"
+                st.session_state.scan_error = f"❌ LỖI TASK [{sid}]: {result['_error']}"
+                st.session_state.active_task_id = None
             else:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 row_log = [
@@ -241,61 +303,41 @@ def handle_scan():
                 ]
                 append_to_google_sheet_async(row_log)
                 
+                # Cập nhật history
                 st.session_state.history = [h for h in st.session_state.history if h['cache_order_task'] != result['cache_order_task']]
                 st.session_state.history.insert(0, result)
-                st.toast(f"🎉 Quét thành công mã: {sid}", icon="✅")
+                
+                # Lưu Task ID vừa quét thành công để kích hoạt popup tự động
+                st.session_state.active_task_id = result["cache_order_task"]
 
-# --- KHU VỰC 1: SCAN MÃ TASK ---
-st.subheader("📷 Giao diện Quét (Đặt con trỏ chuột tại đây để máy quét hoạt động)")
-
+# --- KHU VỰC 1: SCAN MÃ TASK (Cố định ở vị trí trên cùng dễ thao tác) ---
 st.text_input(
-    "Quét mã vạch bất kỳ:", 
+    "📷 Đặt con trỏ vào đây để quét mã:", 
     key="scan_input_field", 
     on_change=handle_scan,
-    placeholder="Máy quét tự động xóa dữ liệu cũ sau khi enter..."
+    placeholder="Nhấn vào để quét tự động..."
 )
 
-# Hiển thị thông báo Alert background đỏ nếu phát hiện lỗi tìm Task
 if st.session_state.scan_error:
     st.error(st.session_state.scan_error)
 
-# --- KHU VỰC 2: DANH SÁCH LỊCH SỬ HÀNG QUÉT ---
-st.subheader("📋 Danh sách Task đã xử lý")
+# KÍCH HOẠT POPUP BẬT LÊN NGAY LẬP TỨC KHI ĐỔI TRẠNG THÁI ACTIVE_TASK_ID
+if st.session_state.active_task_id:
+    task_to_open = st.session_state.active_task_id
+    st.session_state.active_task_id = None  # Xóa trạng thái chờ để tránh loop vô hạn
+    show_task_detail_popup(task_to_open)
+
+# --- KHU VỰC 2: DANH SÁCH RÚT GỌN LỊCH SỬ QUÉT (DÀNH CHO MOBILE) ---
+st.subheader("📋 Lịch sử quét trong phiên")
 if not st.session_state.history:
-    st.info("Hệ thống đang sẵn sàng. Hãy bắt đầu quét mã vạch.")
+    st.info("Hệ thống sẵn sàng. Hãy quét mã vạch.")
 else:
-    for idx, task in enumerate(st.session_state.history):
-        with st.expander(f"📋 Mã Task: {task['cache_order_task']} | Trạng thái: {task['status']} | Số đơn con: {len(task['sub_orders'])}", expanded=(idx==0)):
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Packed", task['packed_order_quantity'])
-            col2.metric("Fulfilled", task['fulfilled_order_quantity'])
-            col3.metric("RTS", task['rts_order_quantity'])
-            col4.write(f"**Thời gian:** {task['create_time_str']}")
+    # Hiển thị list dạng thẻ (Card) rút gọn tối giản trên mobile
+    for h_task in st.session_state.history:
+        with st.container(border=True):
+            st.markdown(f"**Mã Task:** `{h_task['cache_order_task']}`")
+            st.markdown(f"Trạng thái: **{h_task['status']}** | Đơn con: `{len(h_task['sub_orders'])}`")
             
-            st.markdown("---")
-            st.write("### 📦 Thêm nhanh đơn hàng con")
-            
-            with st.form(key=f"add_order_form_{task['cache_order_task']}", clear_on_submit=True):
-                fleet_id_input = st.text_input("Scan / Nhập mã Đơn hàng (Fleet Order ID):")
-                submit_btn = st.form_submit_button("Thêm Đơn Hàng")
-                
-                if submit_btn and fleet_id_input:
-                    fleet_id = extract_latest_scan_code(fleet_id_input.strip())
-                    res_api = add_order_to_task(task['cache_order_task'], fleet_id, cookie_value)
-                    if res_api.get("retcode") == 0:
-                        st.success(f"✅ Thêm thành công đơn: {fleet_id}")
-                    else:
-                        st.error(f"❌ Thất bại: {res_api.get('message')}")
-            
-            st.write("### 📄 Danh sách đơn hàng con hiển thị")
-            if task['sub_orders']:
-                table_data = []
-                for o_idx, o in enumerate(task['sub_orders'], 1):
-                    stime = o.get("scan_time", 0)
-                    stime_str = datetime.fromtimestamp(stime).strftime('%Y-%m-%d %H:%M:%S') if stime else "—"
-                    table_data.append({
-                        "STT": o_idx,
-                        "Mã Đơn Hàng": o.get("fleet_order_id", "—"),
-                        "Thời Gian Quét": stime_str
-                    })
-                st.dataframe(table_data, use_container_width=True)
+            # Nút bấm mở lại Popup bất cứ lúc nào
+            if st.button(f"🔎 Xem chi tiết & Thêm đơn", key=f"btn_open_{h_task['cache_order_task']}", use_container_width=True):
+                show_task_detail_popup(h_task['cache_order_task'])

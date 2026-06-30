@@ -190,21 +190,27 @@ st.set_page_config(page_title="SPX Mobile Scanner", layout="centered")
 st.markdown(
     """
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display:none;}
-    header {visibility: hidden;}
-    div[data-testid="stStatusWidget"] {display: none;}
-    button[title="View app source"] {display: none;}
+    /* 1. Ẩn menu 3 chấm, nút Deploy và toàn bộ thanh Header trên cùng */
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    header {display: none !important; visibility: hidden !important;}
     
-    /* Tăng kích thước font chữ và padding của input trên mobile để dễ bấm */
-    .stTextInput input {
-        font-size: 16px !important;
-        padding: 12px !important;
-    }
-    /* Làm gọn phần thông số metric trên Mobile */
-    div[data-testid="stMetricValue"] {
-        font-size: 24px !important;
+    /* 2. Ẩn nút tròn avatar/pixel quản lý host ở góc dưới bên phải */
+    div[data-testid="stStatusWidget"] {display: none !important; visibility: hidden !important;}
+    
+    /* 3. Ẩn nút "View app source" (Xem nguồn ứng dụng) */
+    button[title="View app source"] {display: none !important;}
+    
+    /* 4. Cấu hình đè để xóa bỏ khoảng trống/thanh công cụ Viewer ở góc dưới màn hình */
+    .stAppToolbar {display: none !important; visibility: hidden !important;}
+    div[class*="viewerBadge"] {display: none !important; visibility: hidden !important;}
+    div[class*="styles_viewerBadge"] {display: none !important; visibility: hidden !important;}
+    iframe[title="Manage app"] {display: none !important; visibility: hidden !important;}
+    
+    /* Cắt bớt phần padding thừa phía trên do ẩn header giúp giao diện khít lên đầu trang */
+    .block-container {
+        padding-top: 2rem !important;
     }
     </style>
     """,
